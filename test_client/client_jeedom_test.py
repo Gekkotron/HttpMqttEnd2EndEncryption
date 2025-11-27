@@ -3,23 +3,24 @@ import base64
 import json
 import time
 import os
+from typing import Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
 
 class EncryptedClient:
-    def __init__(self, gateway_url: str, secret_key: str, jeedom_apikey: str):
+    def __init__(self, gateway_url: str, secret_key: str, apikey: str):
         """
         Initialize encrypted client.
         
         Args:
             gateway_url: URL of the gateway server (e.g., "http://localhost:8081")
             secret_key: 64-character hex string (32 bytes)
-            jeedom_apikey: API key for Jeedom
+            apikey: API key for Server
         """
         self.gateway_url = gateway_url
         self.secret_key = bytes.fromhex(secret_key)
-        self.jeedom_apikey = jeedom_apikey
+        self.apikey = apikey
     
     def encrypt(self, data: dict) -> bytes:
         """Encrypt data using AES-GCM."""
@@ -36,30 +37,58 @@ class EncryptedClient:
         plaintext = aesgcm.decrypt(nonce, ciphertext, None)
         return json.loads(plaintext)
     
-    def send_request(self, jsonrpc: str, params: dict = None, service: str = "jeedom") -> dict:
+    def send_request(self, jsonrpc: str, params: Optional[dict] = None, url: Optional[str] = None,
+                     host: Optional[str] = None, endpoint: str = "/core/api/jeeApi.php") -> dict:
         """
-        Send encrypted JSON-RPC request to Jeedom via gateway server.
-        
+        Send encrypted JSON-RPC request via gateway server.
+
         Args:
             jsonrpc: JSON-RPC method (e.g., "event::changes")
             params: Optional parameters for the JSON-RPC call
-            service: Service type ("jeedom" or "mqtt")
-            
+            url: Full URL to the API (optional, overrides host+endpoint)
+            host: API host (e.g., "http://jeedom:80")
+            endpoint: API endpoint path (default: "/core/api/jeeApi.php")
+
         Returns:
             Decrypted response as dict with keys: status, body, timestamp
         """
-        # Prepare request payload
+        # Prepare request payload - build JSON-RPC body
+        jsonrpc_body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": jsonrpc,
+            "params": {
+                "apikey": self.apikey
+            }
+        }
+
+        if params:
+            jsonrpc_body["params"].update(params)
+
+        # Prepare HTTP request payload
         payload = {
-            "service": service,
-            "endpoint": "/core/api/jeeApi.php",
-            "apikey": self.jeedom_apikey,
-            "jsonrpc": jsonrpc,
+            "method": "POST",
+            "body": jsonrpc_body,
+            "headers": {"Content-Type": "application/json"},
             "timestamp": int(time.time())
         }
+
+        print("Debug: Preparing to send request with payload:")
+        print(json.dumps(payload, indent=2))
+        print(f"Debug: Using URL: {url if url else (host + endpoint if host else 'N/A')}")
         
-        if params:
-            payload["params"] = params
-        
+
+        # Add URL or host+endpoint
+        if url:
+            payload["url"] = url
+        elif host:
+            payload["host"] = host
+            payload["endpoint"] = endpoint
+        else:
+            # Default to environment variable or localhost
+            payload["host"] = os.getenv("JEEDOM_URL", "http://localhost:80")
+            payload["endpoint"] = endpoint
+
         # Encrypt and encode
         encrypted_data = self.encrypt(payload)
         encoded_data = base64.b64encode(encrypted_data)
@@ -78,62 +107,6 @@ class EncryptedClient:
         
         return decrypted_response
     
-    def send_mqtt(self, topic: str, message: str, broker_host: str = None, 
-                  broker_port: int = None, username: str = None, 
-                  password: str = None, qos: int = 0, retain: bool = False) -> dict:
-        """
-        Send encrypted MQTT publish request via gateway server.
-        
-        Args:
-            topic: MQTT topic to publish to
-            message: Message payload to publish
-            broker_host: MQTT broker host (optional, uses server default)
-            broker_port: MQTT broker port (optional, uses server default)
-            username: MQTT username (optional)
-            password: MQTT password (optional)
-            qos: Quality of Service level (0, 1, or 2)
-            retain: Whether to retain the message
-            
-        Returns:
-            Decrypted response as dict with keys: status, body, timestamp
-        """
-        # Prepare MQTT payload
-        payload = {
-            "service": "mqtt",
-            "topic": topic,
-            "message": message,
-            "qos": qos,
-            "retain": retain,
-            "timestamp": int(time.time())
-        }
-        
-        # Add optional parameters
-        if broker_host:
-            payload["broker_host"] = broker_host
-        if broker_port:
-            payload["broker_port"] = broker_port
-        if username:
-            payload["username"] = username
-        if password:
-            payload["password"] = password
-        
-        # Encrypt and encode
-        encrypted_data = self.encrypt(payload)
-        encoded_data = base64.b64encode(encrypted_data)
-        
-        # Send to gateway
-        response = requests.post(
-            f"{self.gateway_url}/gateway",
-            data=encoded_data,
-            headers={"Content-Type": "application/octet-stream"},
-            timeout=30
-        )
-        
-        # Decrypt response
-        encrypted_response = base64.b64decode(response.content)
-        decrypted_response = self.decrypt(encrypted_response)
-        
-        return decrypted_response
 
 
 def main():
@@ -157,7 +130,7 @@ def main():
         return
     
     # Configuration
-    GATEWAY_URL = "http://localhost:10000"
+    GATEWAY_URL = "https://geekoma5.tail497f.ts.net/"
     
     # Create client
     client = EncryptedClient(GATEWAY_URL, SECRET_KEY, os.getenv("JEEDOM_APIKEY", ""))
@@ -170,8 +143,9 @@ def main():
         # Test 1: Valid timestamp with datetime method
         total_tests += 1
         print("Test 1: Valid timestamp request (datetime method)")
+        print(f"Debug: JEEDOM_URL from env: {os.getenv('JEEDOM_URL', 'NOT SET')}")
         try:
-            response = client.send_request(jsonrpc="datetime")
+            response = client.send_request(host=os.getenv("JEEDOM_URL", "http://localhost:80"), jsonrpc="datetime")
             print(f"Status: {response['status']}")
             print(f"Response body: {response['body']}")
             print(f"Timestamp: {response['timestamp']}")
@@ -196,10 +170,18 @@ def main():
         total_tests += 1
         print("Test 2: Expired timestamp request (70 seconds old)")
         try:
+            jsonrpc_body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "datetime",
+                "params": {"apikey": client.apikey}
+            }
             payload = {
-                "service": "jeedom",
-                "apikey": client.jeedom_apikey,
-                "jsonrpc": "datetime",
+                "host": os.getenv("JEEDOM_URL", "http://localhost:80"),
+                "endpoint": "/core/api/jeeApi.php",
+                "method": "POST",
+                "body": jsonrpc_body,
+                "headers": {"Content-Type": "application/json"},
                 "timestamp": int(time.time()) - 70  # 70 seconds ago
             }
             encrypted_data = client.encrypt(payload)
@@ -232,7 +214,7 @@ def main():
         total_tests += 1
         print("Test 3: Request with jeeObject::full method")
         try:
-            response = client.send_request(jsonrpc="jeeObject::full")
+            response = client.send_request(host=os.getenv("JEEDOM_URL", "http://localhost:80"), jsonrpc="jeeObject::full")
             print(f"Status: {response['status']}")
             body = response['body']
 
@@ -261,10 +243,18 @@ def main():
         total_tests += 1
         print("Test 4: Future timestamp request (70 seconds ahead)")
         try:
+            jsonrpc_body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "datetime",
+                "params": {"apikey": client.apikey}
+            }
             payload = {
-                "service": "jeedom",
-                "apikey": client.jeedom_apikey,
-                "jsonrpc": "datetime",
+                "host": os.getenv("JEEDOM_URL", "http://localhost:80"),
+                "endpoint": "/core/api/jeeApi.php",
+                "method": "POST",
+                "body": jsonrpc_body,
+                "headers": {"Content-Type": "application/json"},
                 "timestamp": int(time.time()) + 70  # 70 seconds in future
             }
             encrypted_data = client.encrypt(payload)
@@ -300,9 +290,9 @@ def main():
             wrong_client = EncryptedClient(
                 GATEWAY_URL,
                 "0000000000000000000000000000000000000000000000000000000000000000",
-                JEEDOM_APIKEY
+                os.getenv("JEEDOM_APIKEY", "")
             )
-            response = wrong_client.send_request(jsonrpc="event::changes")
+            response = wrong_client.send_request(host=os.getenv("JEEDOM_URL", "http://localhost:80"), jsonrpc="event::changes")
             print("✗ Test 5 FAILED (should have failed decryption)\n")
             failed_tests += 1
         except Exception as e:
@@ -310,14 +300,22 @@ def main():
             print("✓ Test 5 PASSED (correctly failed)\n")
             passed_tests += 1
         
-        # Test 6: Missing required field (no jsonrpc)
+        # Test 6: Missing required field (no URL/host)
         total_tests += 1
-        print("Test 6: Missing required field (no jsonrpc)")
+        print("Test 6: Missing required field (no URL/host)")
         try:
+            jsonrpc_body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "datetime",
+                "params": {"apikey": client.apikey}
+            }
             payload = {
-                "service": "jeedom",
-                "apikey": client.jeedom_apikey,
+                "method": "POST",
+                "body": jsonrpc_body,
+                "headers": {"Content-Type": "application/json"},
                 "timestamp": int(time.time())
+                # Missing host/url field
             }
             encrypted_data = client.encrypt(payload)
             encoded_data = base64.b64encode(encrypted_data)
@@ -351,7 +349,7 @@ def main():
         try:
             success_count = 0
             for i in range(5):
-                response = client.send_request(jsonrpc="datetime")
+                response = client.send_request(host=os.getenv("JEEDOM_URL", "http://localhost:80"), jsonrpc="datetime")
                 if response['status'] == 200:
                     success_count += 1
             print(f"Successfully completed {success_count}/5 requests")

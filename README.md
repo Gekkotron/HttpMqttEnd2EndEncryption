@@ -1,26 +1,26 @@
 # End-to-End Encryption Gateway
 
-A secure, production-ready gateway server that provides end-to-end encryption for Jeedom API and MQTT communications using AES-GCM encryption. Protect your smart home communications with military-grade encryption while maintaining ease of use.
+A secure, production-ready gateway server that provides end-to-end encryption for HTTP APIs and MQTT communications using AES-GCM encryption. Protect your communications with military-grade encryption while maintaining ease of use.
 
 ## Features
 
 - **AES-GCM Encryption**: Military-grade end-to-end encryption for all requests and responses
-- **Multi-Service Support**: Unified gateway for both Jeedom JSON-RPC API and MQTT broker communications
-- **MQTT SSE Streaming**: Real-time MQTT topic subscriptions via Server-Sent Events over HTTP
+- **Multi-Service Support**: Unified gateway for both generic HTTP APIs and MQTT broker communications
+- **MQTT Publish & Subscribe**: Full MQTT support with encrypted publish and SSE-based subscription streaming
+- **Generic HTTP Proxy**: Forward any HTTP request with encrypted payload
 - **Automatic Key Management**: Secure secret key generation on first launch
 - **Replay Attack Protection**: Timestamp validation with configurable time windows
 - **Docker Ready**: Complete containerization with Docker Compose support
 - **Tailscale Funnel Integration**: Secure public internet exposure without port forwarding
 - **Production Ready**: Comprehensive error handling, logging, and health checks
-- **Extensive Testing**: Full test suite included for both Jeedom and MQTT services
 
 ## Architecture
 
 ```
-┌─────────────┐    Encrypted     ┌─────────────────┐    Unencrypted    ┌──────────┐
-│   Client    │ ───────────────> │  E2E Gateway    │ ────────────────> │  Jeedom  │
-│ (Your App)  │ <─────────────── │   (This App)    │ <──────────────── │  Server  │
-└─────────────┘    AES-GCM       └─────────────────┘                    └──────────┘
+┌─────────────┐    Encrypted     ┌─────────────────┐    Unencrypted    ┌──────────────┐
+│   Client    │ ───────────────> │  E2E Gateway    │ ────────────────> │  HTTP APIs   │
+│ (Your App)  │ <─────────────── │   (This App)    │ <──────────────── │  (Any Server)│
+└─────────────┘    AES-GCM       └─────────────────┘                    └──────────────┘
                                           │
                                           │ Unencrypted
                                           ↓
@@ -29,7 +29,7 @@ A secure, production-ready gateway server that provides end-to-end encryption fo
                                   └─────────────┘
 ```
 
-The gateway acts as a secure proxy, encrypting/decrypting traffic between your client applications and backend services (Jeedom and MQTT).
+The gateway acts as a secure proxy, encrypting/decrypting traffic between your client applications and backend services (HTTP APIs and MQTT).
 
 ## Quick Start
 
@@ -110,8 +110,6 @@ cp .env.example .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SECRET_KEY_FILE` | `server/secret_key.txt` | Path to the secret key file |
-| `JEEDOM_URL` | `http://localhost:80` | Your Jeedom server URL |
-| `JEEDOM_APIKEY` | `` | Your Jeedom API key (for testing) |
 | `MAX_AGE_SECONDS` | `60` | Maximum age for request timestamps (replay protection) |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `10000` | Server port |
@@ -127,12 +125,12 @@ The Docker setup uses a persistent volume for the secret key:
 
 ### Client Implementation
 
-The project includes a ready-to-use Python client class for both Jeedom and MQTT:
+The project includes ready-to-use Python client classes for HTTP and MQTT:
 
-#### Jeedom Example
+#### HTTP Request Example
 
 ```python
-from test_client.client_jeedom_test import EncryptedClient
+from test_client.client_http_test import EncryptedClient
 
 # Load secret key from file
 with open('server/secret_key.txt', 'r') as f:
@@ -141,21 +139,19 @@ with open('server/secret_key.txt', 'r') as f:
 # Initialize client
 client = EncryptedClient(
     gateway_url="http://localhost:10000",
-    secret_key=SECRET_KEY,
-    jeedom_apikey="your-jeedom-api-key"
+    secret_key=SECRET_KEY
 )
 
-# Make encrypted request (datetime method)
-response = client.send_request(jsonrpc="datetime")
+# Make encrypted HTTP request
+response = client.send_request(
+    url="https://api.example.com/endpoint",
+    method="POST",
+    body={"key": "value"},
+    headers={"Content-Type": "application/json"}
+)
 
 print(f"Status: {response['status']}")
 print(f"Body: {response['body']}")
-# Expected body format:
-# {
-#     "jsonrpc": "2.0",
-#     "id": 99999,
-#     "result": 1764197216.35285
-# }
 ```
 
 #### MQTT Publish Example
@@ -233,8 +229,7 @@ import javax.crypto.spec.SecretKeySpec
 
 class EncryptedGatewayClient(
     private val gatewayUrl: String,
-    private val secretKey: String,
-    private val jeedomApiKey: String? = null
+    private val secretKey: String
 ) {
     private val client = OkHttpClient()
     private val keyBytes = hexStringToByteArray(secretKey)
@@ -283,18 +278,22 @@ class EncryptedGatewayClient(
         return JSONObject(String(plaintext, Charsets.UTF_8))
     }
 
-    // Send encrypted Jeedom request
-    suspend fun sendJeedomRequest(
-        jsonrpc: String,
-        params: JSONObject? = null
+    // Send encrypted HTTP request
+    suspend fun sendHttpRequest(
+        url: String,
+        method: String = "POST",
+        body: JSONObject? = null,
+        headers: JSONObject? = null
     ): JSONObject = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
-            put("service", "jeedom")
-            put("apikey", jeedomApiKey)
-            put("jsonrpc", jsonrpc)
+            put("url", url)
+            put("method", method)
             put("timestamp", System.currentTimeMillis() / 1000)
-            if (params != null) {
-                put("params", params)
+            if (body != null) {
+                put("body", body)
+            }
+            if (headers != null) {
+                put("headers", headers)
             }
         }
 
@@ -318,8 +317,8 @@ class EncryptedGatewayClient(
         decrypt(decoded)
     }
 
-    // Send encrypted MQTT request
-    suspend fun sendMqttRequest(
+    // Send encrypted MQTT publish request
+    suspend fun sendMqttPublish(
         topic: String,
         message: String,
         qos: Int = 0,
@@ -330,7 +329,6 @@ class EncryptedGatewayClient(
         password: String? = null
     ): JSONObject = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
-            put("service", "mqtt")
             put("topic", topic)
             put("message", message)
             put("qos", qos)
@@ -350,7 +348,7 @@ class EncryptedGatewayClient(
         )
 
         val request = Request.Builder()
-            .url("$gatewayUrl/gateway")
+            .url("$gatewayUrl/mqtt/publish")
             .post(requestBody)
             .build()
 
@@ -373,27 +371,26 @@ class MainActivity : AppCompatActivity() {
         // Initialize client
         client = EncryptedGatewayClient(
             gatewayUrl = "https://yourdevice.tail497f.ts.net",
-            secretKey = "your-secret-key-here",
-            jeedomApiKey = "your-jeedom-api-key"
+            secretKey = "your-secret-key-here"
         )
 
-        // Make encrypted request
+        // Make encrypted requests
         lifecycleScope.launch {
             try {
-                // Jeedom request - datetime method
-                val response = client.sendJeedomRequest(jsonrpc = "datetime")
+                // HTTP request example
+                val httpResponse = client.sendHttpRequest(
+                    url = "https://api.example.com/data",
+                    method = "POST",
+                    body = JSONObject().apply {
+                        put("key", "value")
+                    }
+                )
 
-                Log.d("Gateway", "Status: ${response.getInt("status")}")
-                val body = response.getJSONObject("body")
-                Log.d("Gateway", "Body: $body")
-                // Expected: {"jsonrpc": "2.0", "id": 99999, "result": 1764197216.35285}
+                Log.d("Gateway", "Status: ${httpResponse.getInt("status")}")
+                Log.d("Gateway", "Body: ${httpResponse.get("body")}")
 
-                if (body.has("result")) {
-                    Log.d("Gateway", "Datetime: ${body.getDouble("result")}")
-                }
-
-                // MQTT request
-                val mqttResponse = client.sendMqttRequest(
+                // MQTT publish request
+                val mqttResponse = client.sendMqttPublish(
                     topic = "home/temperature",
                     message = "22.5",
                     qos = 1,
@@ -492,40 +489,19 @@ private val client = OkHttpClient.Builder()
 
 ### Request Format
 
-All requests must include:
+All requests must include a `timestamp` field for replay protection:
 
 ```json
 {
-    "service": "jeedom|mqtt",
     "timestamp": 1234567890,
-    // Service-specific fields...
+    // Endpoint-specific fields...
 }
 ```
 
-#### Jeedom Request Fields
-
-- `service`: `"jeedom"`
-- `apikey`: Your Jeedom API key
-- `jsonrpc`: JSON-RPC 2.0 method name (e.g., `"jeeObject::full"`, `"event::changes"`)
-- `params`: (Optional) Additional method parameters (merged with apikey in the JSON-RPC params)
-- `endpoint`: (Optional) API endpoint path, defaults to `/core/api/jeeApi.php`
-- `timestamp`: Current Unix timestamp
-
-**Note**: The gateway automatically constructs a proper JSON-RPC 2.0 payload:
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "your-method",
-    "params": {
-        "apikey": "your-api-key",
-        ...additional params
-    }
-}
-```
+Different endpoints require different fields (see API Endpoints section for details).
 
 #### MQTT Publish Request Fields
 
-- `service`: `"mqtt"`
 - `topic`: MQTT topic to publish to
 - `message`: Message payload
 - `broker_host`: (Optional) MQTT broker hostname
@@ -629,8 +605,8 @@ python test_client/client_all_services_test.py
 ### Run Individual Tests
 
 ```bash
-# Jeedom tests (7 test cases)
-python test_client/client_jeedom_test.py
+# HTTP gateway tests
+python test_client/client_http_test.py
 
 # MQTT tests (4 test cases)
 python test_client/client_mqtt_test.py
@@ -638,14 +614,14 @@ python test_client/client_mqtt_test.py
 
 ### Test Coverage
 
-**Jeedom Tests:**
+**HTTP Gateway Tests:**
 - Valid timestamp requests
 - Expired timestamp rejection
 - Future timestamp rejection
-- Parameterized requests
 - Wrong secret key handling
 - Missing required fields
 - Multiple rapid requests (stress test)
+- Different HTTP methods (GET, POST, PUT, DELETE)
 
 **MQTT Tests:**
 - Basic message publishing
@@ -706,11 +682,11 @@ FullEndToEndEncryption/
 │   ├── gateway.py           # Request routing and handling
 │   ├── key_manager.py       # Secret key generation
 │   └── services/
-│       ├── jeedom_service.py      # Jeedom JSON-RPC handler
+│       ├── http_service.py        # Generic HTTP proxy handler
 │       ├── mqtt_service.py        # MQTT publish handler
 │       └── mqtt_sse_service.py    # MQTT subscribe via SSE handler
 ├── test_client/
-│   ├── client_jeedom_test.py      # Jeedom client and tests
+│   ├── client_http_test.py        # HTTP gateway client and tests
 │   ├── client_mqtt_test.py        # MQTT publish client and tests
 │   ├── client_mqtt_sse_test.py    # MQTT SSE subscribe client
 │   └── client_all_services_test.py  # Test runner
@@ -725,31 +701,47 @@ FullEndToEndEncryption/
 
 ### POST /gateway
 
-Main gateway endpoint for all encrypted requests (Jeedom and MQTT publish).
+Gateway endpoint for encrypted HTTP requests to any API.
 
 - **Content-Type**: `application/octet-stream`
 - **Body**: Base64-encoded encrypted payload
 - **Response**: Base64-encoded encrypted response
 
+**Payload Fields:**
+- `url`: Target HTTP server URL (required if `host` not provided)
+- `host`: Target server host (required if `url` not provided, e.g., "http://example.com:8080")
+- `endpoint`: API endpoint path (optional, defaults to "/", e.g., "/api/v1/data")
+- `method`: HTTP method (GET, POST, PUT, DELETE, etc.), defaults to "POST"
+- `body`: Request body (dict for JSON or string for raw data)
+- `headers`: (Optional) HTTP headers dict, defaults to `{"Content-Type": "application/json"}`
+- `timeout`: (Optional) Request timeout in seconds, defaults to 30
+- `timestamp`: Current Unix timestamp (required for replay protection)
+
+**Usage:**
+This endpoint acts as a generic encrypted HTTP proxy. You can forward any HTTP request through it with end-to-end encryption. The gateway will decrypt your request, forward it to the target URL, and return the encrypted response.
+
+You can specify the target in two ways:
+1. **Complete URL**: Use the `url` parameter with the full URL
+2. **Host + Endpoint**: Use `host` (e.g., "http://api.example.com") and `endpoint` (e.g., "/api/data") - they will be combined into a complete URL
+
 ### POST /mqtt/publish
 
-Encrypted MQTT publish endpoint (via `/gateway` with `service: "mqtt"`).
+Encrypted MQTT publish endpoint for publishing messages to MQTT brokers.
 
 - **Content-Type**: `application/octet-stream`
 - **Body**: Base64-encoded encrypted payload with MQTT publish details
 - **Response**: Base64-encoded encrypted response
 
 **Payload Fields:**
-- `service`: Must be `"mqtt"`
-- `topic`: MQTT topic to publish to
-- `message`: Message payload to publish
+- `topic`: MQTT topic to publish to (required)
+- `message`: Message payload to publish (required)
 - `qos`: (Optional) Quality of Service (0-2), defaults to 0
 - `retain`: (Optional) Retain flag, defaults to false
 - `broker_host`: (Optional) MQTT broker hostname
 - `broker_port`: (Optional) MQTT broker port
 - `username`: (Optional) MQTT username
 - `password`: (Optional) MQTT password
-- `timestamp`: Current Unix timestamp
+- `timestamp`: Current Unix timestamp (required for replay protection)
 
 **Usage:**
 This endpoint allows you to publish messages to MQTT topics through the encrypted gateway. Messages are published once and the response confirms success or failure.
@@ -784,7 +776,7 @@ Health check endpoint.
 
 - **Flask 3.0.0**: Web framework
 - **cryptography 41.0.7**: AES-GCM encryption
-- **requests 2.31.0**: HTTP client for Jeedom
+- **requests 2.31.0**: HTTP client for proxying requests
 - **paho-mqtt 1.6.1**: MQTT client library
 - **python-dotenv 1.0.0**: Environment variable management
 

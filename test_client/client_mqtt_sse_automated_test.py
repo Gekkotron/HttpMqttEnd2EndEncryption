@@ -115,7 +115,7 @@ def main():
         print(f"Error loading secret key: {e}")
         return
 
-    SERVER_URL = "http://localhost:10000"
+    SERVER_URL = "https://geekoma5.tail497f.ts.net/"
     client = SSETestClient(SERVER_URL, SECRET_KEY)
 
     total_tests = 0

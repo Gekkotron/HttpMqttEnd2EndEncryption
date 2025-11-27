@@ -27,11 +27,26 @@ class EncryptedClient:
         plaintext = aesgcm.decrypt(nonce, ciphertext, None)
         return json.loads(plaintext)
     
-    def send_mqtt(self, topic: str, message: str, broker_host: str = None, 
-                  broker_port: int = None, username: str = None, 
+    def send_mqtt(self, topic: str, message: str, broker_host: str = None,
+                  broker_port: int = None, username: str = None,
                   password: str = None, qos: int = 0, retain: bool = False) -> dict:
+        """
+        Send MQTT publish request via gateway server.
+
+        Args:
+            topic: MQTT topic to publish to
+            message: Message to publish
+            broker_host: Optional MQTT broker hostname
+            broker_port: Optional MQTT broker port
+            username: Optional MQTT username
+            password: Optional MQTT password
+            qos: Quality of Service level (0, 1, or 2)
+            retain: Retain flag
+
+        Returns:
+            Decrypted response as dict with keys: status, body, timestamp
+        """
         payload = {
-            "service": "mqtt",
             "topic": topic,
             "message": message,
             "qos": qos,
@@ -46,14 +61,17 @@ class EncryptedClient:
             payload["username"] = username
         if password:
             payload["password"] = password
+
         encrypted_data = self.encrypt(payload)
         encoded_data = base64.b64encode(encrypted_data)
+
         response = requests.post(
-            f"{self.gateway_url}/gateway",
+            f"{self.gateway_url}/mqtt/publish",
             data=encoded_data,
             headers={"Content-Type": "application/octet-stream"},
             timeout=30
         )
+
         encrypted_response = base64.b64decode(response.content)
         decrypted_response = self.decrypt(encrypted_response)
         return decrypted_response
@@ -66,7 +84,7 @@ def main():
     except Exception as e:
         print(f"Error loading secret key: {e}")
         return
-    GATEWAY_URL = "http://localhost:10000"
+    GATEWAY_URL = "https://geekoma5.tail497f.ts.net/"
     client = EncryptedClient(GATEWAY_URL, SECRET_KEY)
 
     total_tests = 0

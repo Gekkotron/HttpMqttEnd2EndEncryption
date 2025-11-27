@@ -129,7 +129,7 @@ def subscribe_to_mqtt_topic(
 
 if __name__ == "__main__":
     # Example usage
-    SERVER_URL = "http://localhost:10000"
+    SERVER_URL = "https://geekoma5.tail497f.ts.net/"
 
     # Test with default MQTT broker from config
     # Subscribe to test topic

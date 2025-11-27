@@ -17,7 +17,6 @@ EXPOSE 10000
 
 # Set environment variables
 ENV SECRET_KEY_FILE=/app/data/secret_key.txt
-ENV JEEDOM_URL=http://jeedom:80
 ENV MAX_AGE_SECONDS=60
 ENV HOST=0.0.0.0
 ENV PORT=10000
