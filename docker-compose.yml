@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: .
+    container_name: encryption-gateway
+    ports:
+      - "10000:10000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - JEEDOM_URL=${JEEDOM_URL:-http://jeedom:80}
+      - MAX_AGE_SECONDS=${MAX_AGE_SECONDS:-60}
+      - SECRET_KEY_FILE=/app/data/secret_key.txt
+      - HOST=0.0.0.0
+      - PORT=10000
+    restart: unless-stopped
+    labels:
+      - "com.geckostudio.encryption-gateway.description=Encryption Gateway for Jeedom"
+      - "com.geckostudio.encryption-gateway.version=1.0.0"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - gateway-network
+
+networks:
+  gateway-network:
+    driver: bridge
