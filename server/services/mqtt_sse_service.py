@@ -67,10 +67,19 @@ class MQTTSSEService:
 
         def on_message(client, userdata, msg):
             try:
+                # Decode payload as UTF-8
+                payload_str = msg.payload.decode("utf-8")
+
+                # Try to parse as JSON, fallback to string if invalid
+                try:
+                    payload_data = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    payload_data = payload_str
+
                 message_queue.put({
                     "type": "message",
                     "topic": msg.topic,
-                    "payload": msg.payload.decode("utf-8"),
+                    "payload": payload_data,
                     "qos": msg.qos,
                     "retain": msg.retain,
                     "timestamp": int(time.time())
