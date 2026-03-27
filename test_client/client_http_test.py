@@ -84,7 +84,7 @@ def main():
 
     try:
         SECRET_KEY = load_secret_key()
-        print(f"Loaded secret key from server/secret_key.txt")
+        print("Loaded secret key from server/secret_key.txt")
     except FileNotFoundError:
         print("Error: server/secret_key.txt not found! Run the server first.")
         return
@@ -164,9 +164,37 @@ def main():
         print(f"FAIL: {e}\n")
         failed_tests += 1
 
-    # Test 4: Wrong secret key
+    # Test 4: Future timestamp (should be rejected)
     total_tests += 1
-    print("Test 4: Wrong secret key")
+    print("Test 4: Future timestamp (70 seconds ahead)")
+    try:
+        payload = {
+            "url": TEST_URL,
+            "method": "GET",
+            "timestamp": int(time.time()) + 70,
+        }
+        encrypted_data = client.encrypt(payload)
+        encoded_data = base64.b64encode(encrypted_data)
+        resp = requests.post(
+            f"{client.gateway_url}/gateway",
+            data=encoded_data,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=30,
+        )
+        decrypted = client.decrypt(base64.b64decode(resp.content))
+        if decrypted["status"] == 403 and "expired" in str(decrypted["body"]).lower():
+            print("PASS (correctly rejected)\n")
+            passed_tests += 1
+        else:
+            print("FAIL (should have been rejected)\n")
+            failed_tests += 1
+    except Exception as e:
+        print(f"FAIL: {e}\n")
+        failed_tests += 1
+
+    # Test 5: Wrong secret key
+    total_tests += 1
+    print("Test 5: Wrong secret key")
     try:
         wrong_client = EncryptedHttpClient(
             GATEWAY_URL,
@@ -179,9 +207,9 @@ def main():
         print("PASS (correctly failed)\n")
         passed_tests += 1
 
-    # Test 5: Missing URL field
+    # Test 6: Missing URL field
     total_tests += 1
-    print("Test 5: Missing URL field")
+    print("Test 6: Missing URL field")
     try:
         payload = {
             "method": "GET",
