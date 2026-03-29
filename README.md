@@ -154,6 +154,78 @@ print(f"Status: {response['status']}")
 print(f"Body: {response['body']}")
 ```
 
+#### Jeedom JSON-RPC Example
+
+Use the gateway to communicate with a Jeedom home automation server via its JSON-RPC API:
+
+```python
+from test_client.client_http_test import EncryptedHttpClient
+
+# Load secret key
+with open('server/secret_key.txt', 'r') as f:
+    SECRET_KEY = f.read().strip()
+
+client = EncryptedHttpClient(
+    gateway_url="https://yourdevice.tail497f.ts.net",
+    secret_key=SECRET_KEY
+)
+
+# Get Jeedom server datetime
+response = client.send_request(
+    url="http://jeedom-host/core/api/jeeApi.php",
+    method="POST",
+    headers={"Content-Type": "application/json"},
+    body={
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "datetime",
+        "params": {
+            "apikey": "your-jeedom-api-key"
+        }
+    }
+)
+
+print(f"Status: {response['status']}")
+print(f"Jeedom datetime: {response['body']['result']}")
+
+# Get all objects with full details
+response = client.send_request(
+    url="http://jeedom-host/core/api/jeeApi.php",
+    method="POST",
+    headers={"Content-Type": "application/json"},
+    body={
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "jeeObject::full",
+        "params": {
+            "apikey": "your-jeedom-api-key"
+        }
+    }
+)
+
+for obj in response['body']['result']:
+    print(f"Object: {obj['name']} (id={obj['id']})")
+
+# Execute a command (e.g., turn on a light)
+response = client.send_request(
+    url="http://jeedom-host/core/api/jeeApi.php",
+    method="POST",
+    headers={"Content-Type": "application/json"},
+    body={
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "cmd::execCmd",
+        "params": {
+            "apikey": "your-jeedom-api-key",
+            "id": 42,  # Command ID
+            "options": {}
+        }
+    }
+)
+
+print(f"Command result: {response['body']}")
+```
+
 #### MQTT Publish Example
 
 ```python
