@@ -11,4 +11,5 @@
 #   1. Start your Python server: python3 server.py
 #   2. Run this script: ./run_tailscale.sh
 #   3. The public HTTPS URL will be shown in the output of 'tailscale funnel list'.
+sudo tailscale funnel off
 sudo tailscale funnel -bg 10000
