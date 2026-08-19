@@ -701,6 +701,104 @@ python test_client/client_mqtt_test.py
 - Custom broker configuration
 - Error handling for missing fields
 
+## Health Checks
+
+Two independent health checks help diagnose flaky home-automation connections. Run each on its own, or both together — the exit code makes them cron/monitoring friendly (`0` OK, `1` failure, `2` configuration error).
+
+```bash
+# Both checks (default)
+python -m test_client.health_check
+
+# HTTP gateway only: /health ping + encrypted round-trip
+python -m test_client.health_check --gateway
+
+# Tailscale only: daemon + funnel + remote HTTPS probe
+python -m test_client.health_check --tailscale
+
+# Auto-remediate: restart whatever failed, then re-check
+python -m test_client.health_check --restart
+
+# Quiet mode (exit code only) — cron-friendly
+python -m test_client.health_check --all -q --restart
+```
+
+**Auto-restart (`--restart`):** on a *hard failure* (exit 1), the failing component is restarted, then re-checked with **exponential backoff** until it recovers or the attempt budget is exhausted. Configuration errors (exit 2) never trigger a restart — fix the config first.
+
+- Gateway restart defaults to `docker compose restart gateway` (matching `docker-compose.yml`). Override with `GATEWAY_RESTART_CMD` if you run the app another way.
+- Tailscale restart defaults to `./run_tailscale.sh` — the same script used to bring the funnel up manually. The script uses `sudo` internally, so passwordless sudo is required for headless/cron use. Override with `TAILSCALE_RESTART_CMD` if you want something else.
+
+Post-restart backoff (delays are cumulative, loop stops on the first PASS):
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `RESTART_BACKOFF_INITIAL` | Seconds before the first re-check | `2` |
+| `RESTART_BACKOFF_FACTOR` | Multiplier applied between attempts | `2` |
+| `RESTART_BACKOFF_MAX_ATTEMPTS` | Maximum re-check attempts (`0` = retry forever) | `5` |
+| `RESTART_BACKOFF_MAX_DELAY` | Per-attempt delay cap in seconds | `300` |
+
+With defaults, delays are 2s, 4s, 8s, 16s, 32s (max ~62s of waiting).
+Set `RESTART_BACKOFF_MAX_ATTEMPTS=0` to retry forever — the delay grows exponentially, plateaus at `RESTART_BACKOFF_MAX_DELAY` (5min by default), and the loop only exits when the check passes. Pair this with a systemd/cron *timer* rather than a supervisor loop if you want to be able to kill it easily.
+
+### MQTT failure alerts
+
+When a check ends in a non-zero state (either a plain failure or, when `--restart` was used, a failure the restart didn't recover), the orchestrator publishes a JSON message to the configured MQTT broker. Recovered checks stay silent. The alert is a side channel — if the broker is unreachable, a warning is printed to stderr but the exit code is not affected.
+
+**Topic layout:** `<HEALTH_ALERT_MQTT_TOPIC_PREFIX>/<component>`
+
+Default topics (matching the docker-compose `container_name: encryption-gateway`):
+- `encryption-gateway/health/gateway`
+- `encryption-gateway/health/tailscale`
+
+Override `HEALTH_ALERT_MQTT_TOPIC_PREFIX` if you'd rather group these under something else (e.g. per-house or per-room).
+
+**Payload (JSON):**
+```json
+{
+  "component": "gateway",
+  "status": "fail",           // or "config_error" for exit 2
+  "exit_code": 1,
+  "restart_attempted": true,
+  "timestamp": 1723456789,
+  "host": "raspberrypi"
+}
+```
+
+**Env vars:**
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `MQTT_BROKER_HOST` | Broker hostname (required for alerts to fire) | *(unset — alerts disabled)* |
+| `MQTT_BROKER_PORT` | Broker port | `1883` |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | Optional broker credentials | *(unset)* |
+| `HEALTH_ALERT_ENABLED` | `auto` (enable if broker set), `true`, or `false` | `auto` |
+| `HEALTH_ALERT_MQTT_TOPIC_PREFIX` | Topic prefix | `encryption-gateway/health` |
+| `HEALTH_ALERT_MQTT_QOS` | QoS 0/1/2 | `1` |
+| `HEALTH_ALERT_MQTT_RETAIN` | Retain flag (bool) | `false` |
+| `HEALTH_ALERT_MQTT_TIMEOUT` | Connect timeout, seconds | `5` |
+
+Pass `--no-alert` on the command line to skip publishing for a single invocation (useful when running the check interactively during debugging).
+
+**Gateway check** (`test_client/health_check_gateway.py`) runs:
+1. `GET /health` — proves Flask is up.
+2. Encrypted round-trip through `/gateway` to `HEALTH_CHECK_URL` (default `https://httpbin.org/get`) — proves the crypto path is intact end-to-end.
+
+**Tailscale check** (`test_client/health_check_tailscale.py`) runs:
+1. `tailscale status --json` — daemon is running and this node is online.
+2. `tailscale funnel status` — funnel is bound to the expected port.
+3. HTTPS `GET /health` on `TAILSCALE_FUNNEL_URL` — the public URL is reachable.
+
+Additional environment variables (see `.env.example`):
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `HEALTH_CHECK_URL` | Target URL for the encrypted round-trip | `https://httpbin.org/get` |
+| `HEALTH_TIMEOUT` | Per-request timeout, seconds | `10` |
+| `TAILSCALE_FUNNEL_URL` | Public funnel URL to probe remotely | *(unset — remote probe fails)* |
+| `TAILSCALE_FUNNEL_PORT` | Expected port bound to the funnel | `10000` |
+| `TAILSCALE_BIN` | tailscale CLI binary path | `tailscale` |
+| `GATEWAY_RESTART_CMD` | Command run by `--restart` for the gateway | `docker compose restart gateway` |
+| `TAILSCALE_RESTART_CMD` | Command run by `--restart` for the funnel | `./run_tailscale.sh` |
+
 ## Tailscale Funnel Deployment
 
 Expose your gateway securely over the internet using Tailscale Funnel:
