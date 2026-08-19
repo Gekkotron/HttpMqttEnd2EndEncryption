@@ -111,13 +111,28 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _run_with_optional_restart(
-    label: str, module, *, restart: bool, backoff: BackoffConfig, verbose: bool
+    label: str, module, *, restart: bool, backoff: BackoffConfig, verbose: bool,
+    alerts_enabled: bool,
 ) -> tuple[int, bool]:
     """Run a check module; on hard failure and --restart, bounce and re-check with backoff.
 
+    State is published to MQTT after every check attempt (and after a failed
+    restart command), so a subscriber sees the fail state immediately instead
+    of waiting for a possibly infinite retry loop to unwind.
+
     Returns (final_exit_code, restart_attempted).
     """
+    def _publish(exit_code: int, *, restart_attempted: bool) -> None:
+        if not alerts_enabled:
+            return
+        sys.stdout.flush()
+        health_alert.publish_alert(
+            label, exit_code,
+            restart_attempted=restart_attempted, verbose=verbose,
+        )
+
     code = module.run(verbose=verbose)
+    _publish(code, restart_attempted=False)
     if code != 1 or not restart:
         return code, False
 
@@ -129,6 +144,7 @@ def _run_with_optional_restart(
         marker = "PASS" if ok else "FAIL"
         print(f"[{label}] restart {marker}: {detail}")
     if not ok:
+        _publish(1, restart_attempted=True)
         return 1, True
 
     last_code = 1
@@ -140,6 +156,7 @@ def _run_with_optional_restart(
             )
         time.sleep(delay)
         last_code = module.run(verbose=verbose)
+        _publish(last_code, restart_attempted=True)
         if last_code == 0:
             if verbose:
                 print(f"[{label}] recovered after {attempt} attempt(s)")
@@ -163,32 +180,22 @@ def main(argv: list[str] | None = None) -> int:
     codes: list[int] = []
 
     if run_gateway:
-        code, restart_attempted = _run_with_optional_restart(
+        code, _ = _run_with_optional_restart(
             "gateway", health_check_gateway,
             restart=args.restart, backoff=backoff, verbose=verbose,
+            alerts_enabled=alerts_enabled,
         )
         codes.append(code)
-        if alerts_enabled:
-            sys.stdout.flush()
-            health_alert.publish_alert(
-                "gateway", code,
-                restart_attempted=restart_attempted, verbose=verbose,
-            )
         if verbose:
             print()
 
     if run_tailscale:
-        code, restart_attempted = _run_with_optional_restart(
+        code, _ = _run_with_optional_restart(
             "tailscale", health_check_tailscale,
             restart=args.restart, backoff=backoff, verbose=verbose,
+            alerts_enabled=alerts_enabled,
         )
         codes.append(code)
-        if alerts_enabled:
-            sys.stdout.flush()
-            health_alert.publish_alert(
-                "tailscale", code,
-                restart_attempted=restart_attempted, verbose=verbose,
-            )
         if verbose:
             print()
 
