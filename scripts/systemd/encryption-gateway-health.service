@@ -26,7 +26,8 @@ TimeoutStartSec=15min
 SuccessExitStatus=0 1 2
 
 # Hardening — this unit shells out to `tailscale`, `docker`, and reads .env.
-NoNewPrivileges=true
+# NOTE: NoNewPrivileges is intentionally NOT set: the tailscale restart path
+# uses sudo, which requires setuid and is blocked by NoNewPrivileges=true.
 ProtectSystem=full
 ProtectHome=read-only
 PrivateTmp=true
