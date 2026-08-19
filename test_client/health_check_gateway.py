@@ -12,7 +12,9 @@ Exit codes:
 
 Environment variables:
   GATEWAY_URL          Gateway base URL (default: http://localhost:10000)
-  SECRET_KEY_FILE      Path to the hex secret key (default: server/secret_key.txt)
+  SECRET_KEY_FILE      Path to the hex secret key. If unset, the first existing
+                       of `data/secret_key.txt` (Docker mount) and
+                       `server/secret_key.txt` (dev) is used.
   HEALTH_CHECK_URL     URL used for the encrypted round-trip
                        (default: https://httpbin.org/get)
   HEALTH_TIMEOUT       Per-request timeout in seconds (default: 10)
@@ -138,17 +140,48 @@ def _load_secret_key(path: str) -> bytes:
         return bytes.fromhex(f.read().strip())
 
 
+# Order matters: Docker layout (bind-mounted `./data:/app/data`) first,
+# then the plain-Python dev layout. An explicit SECRET_KEY_FILE overrides both.
+_KEY_FILE_CANDIDATES = ("data/secret_key.txt", "server/secret_key.txt")
+
+
+def _resolve_key_file(explicit: str) -> str | None:
+    """Return the path to use for the secret key, or None if none is found.
+
+    If SECRET_KEY_FILE is set, honour it exactly (returned as-is; the caller
+    surfaces FileNotFoundError with the same path for a helpful message).
+    Otherwise search the well-known candidate locations.
+    """
+    if explicit:
+        return explicit
+    for candidate in _KEY_FILE_CANDIDATES:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def run(verbose: bool = True) -> int:
     """Run the gateway health check. Returns a process exit code."""
     load_dotenv()
 
     gateway_url = env_str("GATEWAY_URL", "http://localhost:10000").rstrip("/")
-    key_file = env_str("SECRET_KEY_FILE", "server/secret_key.txt")
+    explicit_key_file = env_str("SECRET_KEY_FILE")
     target_url = env_str("HEALTH_CHECK_URL", "https://httpbin.org/get")
     timeout = env_float("HEALTH_TIMEOUT", 10)
 
     if verbose:
         print(f"[gateway] checking {gateway_url}")
+
+    key_file = _resolve_key_file(explicit_key_file)
+    if key_file is None:
+        candidates = ", ".join(_KEY_FILE_CANDIDATES)
+        print(
+            f"[gateway] CONFIG ERROR: no secret key file found "
+            f"(searched: {candidates}). Set SECRET_KEY_FILE to override."
+        )
+        return 2
+    if verbose and not explicit_key_file:
+        print(f"[gateway] using secret key from {key_file} (auto-detected)")
 
     try:
         secret_key = _load_secret_key(key_file)
