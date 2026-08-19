@@ -1,0 +1,31 @@
+[Unit]
+Description=Encryption Gateway health check (one-shot)
+Documentation=https://github.com/Gekkotron/HttpMqttEnd2EndEncryption
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Fill these in with your install paths (see scripts/install-systemd.sh):
+User={{USER}}
+WorkingDirectory={{REPO_DIR}}
+EnvironmentFile={{REPO_DIR}}/.env
+# Use the project's venv if you created one; falls back to system python3.
+ExecStart={{PYTHON_BIN}} -m test_client.health_check --all --restart
+
+# Cap a hung run so a stuck check can't jam future timer firings.
+TimeoutStartSec=15min
+
+# Health-check failures shouldn't mark the unit as failed for the timer's sake
+# (we still want the next scheduled fire). MQTT alerts and journal logs are the
+# real signal.
+SuccessExitStatus=0 1 2
+
+# Hardening — this unit shells out to `tailscale`, `docker`, and reads .env.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

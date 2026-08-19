@@ -1,0 +1,20 @@
+[Unit]
+Description=Encryption Gateway health check timer
+Documentation=https://github.com/Gekkotron/HttpMqttEnd2EndEncryption
+
+[Timer]
+# Fire 1 minute after boot, then every 5 minutes after each activation.
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+# Don't stack up firings if a run is very slow.
+AccuracySec=15s
+
+# Persistent=true would fire an immediately-missed run on boot after downtime.
+# We already fire OnBootSec=1min, so leave this off to avoid a double-fire.
+Persistent=false
+
+Unit=encryption-gateway-health.service
+
+[Install]
+WantedBy=timers.target

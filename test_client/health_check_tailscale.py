@@ -15,6 +15,11 @@ Environment variables:
                           (required for the remote check)
   TAILSCALE_FUNNEL_PORT   Expected port bound to the funnel (default: 10000)
   TAILSCALE_BIN           tailscale binary path (default: tailscale)
+  TAILSCALE_CHECK_LOCAL   'auto' (default) runs the local daemon/funnel checks
+                          when the tailscale CLI is available and skips them
+                          otherwise (e.g. inside a container). 'true' forces
+                          them on (config error if the binary is missing).
+                          'false' forces them off (remote probe only).
   HEALTH_TIMEOUT          Per-request timeout in seconds (default: 10)
   TAILSCALE_RESTART_CMD   Shell command used by restart() to re-arm the funnel.
                           Default: './run_tailscale.sh' (which uses sudo internally).
@@ -138,6 +143,25 @@ def restart(verbose: bool = True) -> tuple[bool, str]:
     return True, "restart command succeeded"
 
 
+def _should_check_local(bin_path: str) -> tuple[bool, str]:
+    """Resolve TAILSCALE_CHECK_LOCAL (auto/true/false) against binary availability.
+
+    Returns (do_local_checks, reason). ``reason`` is only meaningful when the
+    local checks are skipped or when the resolution is forced.
+    """
+    mode = os.getenv("TAILSCALE_CHECK_LOCAL", "auto").strip().lower()
+    have_bin = shutil.which(bin_path) is not None
+
+    if mode in ("true", "1", "yes", "on"):
+        return True, "forced on"
+    if mode in ("false", "0", "no", "off"):
+        return False, "forced off"
+    # auto
+    if have_bin:
+        return True, "auto: tailscale CLI present"
+    return False, f"auto: '{bin_path}' not on PATH"
+
+
 def run(verbose: bool = True) -> int:
     """Run the tailscale health check. Returns a process exit code."""
     load_dotenv()
@@ -147,18 +171,33 @@ def run(verbose: bool = True) -> int:
     funnel_url = os.getenv("TAILSCALE_FUNNEL_URL", "").strip()
     timeout = float(os.getenv("HEALTH_TIMEOUT", "10"))
 
-    if verbose:
-        print(f"[tailscale] using bin={bin_path}, expected port={expected_port}")
+    do_local, local_reason = _should_check_local(bin_path)
 
-    if shutil.which(bin_path) is None:
+    if verbose:
+        print(
+            f"[tailscale] using bin={bin_path}, expected port={expected_port}, "
+            f"local checks={'on' if do_local else 'off'} ({local_reason})"
+        )
+
+    # Forced-on but binary is missing -> genuine config error.
+    if do_local and shutil.which(bin_path) is None:
         print(f"[tailscale] CONFIG ERROR: '{bin_path}' not found on PATH")
         return 2
 
-    checks = [
-        ("daemon status", lambda: check_daemon(bin_path)),
-        ("funnel status", lambda: check_funnel(bin_path, expected_port)),
-        ("remote probe", lambda: check_remote(funnel_url, timeout)),
-    ]
+    # If we're skipping local checks and the remote probe has no URL, there is
+    # literally nothing to check - treat as config error rather than a false PASS.
+    if not do_local and not funnel_url:
+        print(
+            "[tailscale] CONFIG ERROR: local checks disabled and "
+            "TAILSCALE_FUNNEL_URL is not set - nothing to check"
+        )
+        return 2
+
+    checks = []
+    if do_local:
+        checks.append(("daemon status", lambda: check_daemon(bin_path)))
+        checks.append(("funnel status", lambda: check_funnel(bin_path, expected_port)))
+    checks.append(("remote probe", lambda: check_remote(funnel_url, timeout)))
 
     failed = 0
     for name, run_check in checks:

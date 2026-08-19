@@ -796,8 +796,48 @@ Additional environment variables (see `.env.example`):
 | `TAILSCALE_FUNNEL_URL` | Public funnel URL to probe remotely | *(unset — remote probe fails)* |
 | `TAILSCALE_FUNNEL_PORT` | Expected port bound to the funnel | `10000` |
 | `TAILSCALE_BIN` | tailscale CLI binary path | `tailscale` |
+| `TAILSCALE_CHECK_LOCAL` | `auto`/`true`/`false` — run local daemon+funnel checks | `auto` |
 | `GATEWAY_RESTART_CMD` | Command run by `--restart` for the gateway | `docker compose restart gateway` |
 | `TAILSCALE_RESTART_CMD` | Command run by `--restart` for the funnel | `./run_tailscale.sh` |
+
+### Running the health check automatically at startup (systemd)
+
+Ships with a `.service` + `.timer` pair under `scripts/systemd/`. The timer fires once ~1 minute after boot and then every 5 minutes; the service runs `python -m test_client.health_check --all --restart` and exits (single-shot per fire). Compared to a supervisor loop, this pattern:
+
+- Uses the system journal for logs (`journalctl -u encryption-gateway-health -f`).
+- Bounds each run with `TimeoutStartSec=15min`, so a hung network call can't jam future firings.
+- Can be started/stopped cleanly with `systemctl` — no PID files.
+
+**Install (one command; rerun after moving the repo or changing the venv):**
+
+```bash
+sudo scripts/install-systemd.sh
+```
+
+The installer picks up the current directory as `REPO_DIR`, the invoking user (`$SUDO_USER`) as the service user, and `./.venv/bin/python` if you use a venv (falling back to system `python3`). Override any of these with env vars, e.g. `sudo REPO_DIR=/opt/enc-gw PYTHON_BIN=/usr/local/bin/python3.11 scripts/install-systemd.sh`.
+
+**Common ops:**
+
+```bash
+systemctl status encryption-gateway-health.timer      # is the timer armed?
+systemctl list-timers | grep encryption-gateway       # when's the next fire?
+journalctl -u encryption-gateway-health.service -f    # follow live logs
+systemctl start encryption-gateway-health.service     # run one check immediately
+systemctl disable --now encryption-gateway-health.timer   # stop the periodic runs
+```
+
+**Tuning the interval:** edit `OnUnitActiveSec=` in `scripts/systemd/encryption-gateway-health.timer` and rerun the installer.
+
+### Cron alternative (non-systemd hosts)
+
+If you're not on systemd, a plain crontab entry works fine:
+
+```cron
+@reboot   sleep 60 && cd /opt/enc-gw && /opt/enc-gw/.venv/bin/python -m test_client.health_check --all --restart >> /var/log/enc-gw-health.log 2>&1
+*/5 * * * * cd /opt/enc-gw && /opt/enc-gw/.venv/bin/python -m test_client.health_check --all --restart >> /var/log/enc-gw-health.log 2>&1
+```
+
+Note that cron doesn't provide the `TimeoutStartSec` safety net — a hung check can pile up if the interval is short. Prefer systemd where available.
 
 ## Tailscale Funnel Deployment
 
