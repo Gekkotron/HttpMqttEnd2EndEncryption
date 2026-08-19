@@ -13,6 +13,10 @@ EnvironmentFile={{REPO_DIR}}/.env
 # Use the project's venv if you created one; falls back to system python3.
 ExecStart={{PYTHON_BIN}} -m test_client.health_check --all --restart
 
+# Line-buffer Python stdout/stderr so journalctl -f streams progress in real
+# time instead of blocking until the process exits or fills its 4 KB buffer.
+Environment=PYTHONUNBUFFERED=1
+
 # Cap a hung run so a stuck check can't jam future timer firings.
 TimeoutStartSec=15min
 
