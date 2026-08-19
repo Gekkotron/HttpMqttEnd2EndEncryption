@@ -1,6 +1,6 @@
-# End-to-End Encryption Gateway
+# Athena-HttpMqttGateway
 
-A secure, production-ready gateway server that provides end-to-end encryption for HTTP APIs and MQTT communications using AES-GCM encryption. Protect your communications with military-grade encryption while maintaining ease of use.
+An end-to-end encrypted gateway for HTTP APIs and MQTT communications, using AES-GCM. Ship home-automation traffic over the public internet through a single encrypted tunnel — no per-service certificates, no exposed brokers.
 
 ## Features
 
@@ -17,16 +17,16 @@ A secure, production-ready gateway server that provides end-to-end encryption fo
 ## Architecture
 
 ```
-┌─────────────┐    Encrypted     ┌─────────────────┐    Unencrypted    ┌──────────────┐
-│   Client    │ ───────────────> │  E2E Gateway    │ ────────────────> │  HTTP APIs   │
-│ (Your App)  │ <─────────────── │   (This App)    │ <──────────────── │  (Any Server)│
-└─────────────┘    AES-GCM       └─────────────────┘                    └──────────────┘
-                                          │
-                                          │ Unencrypted
-                                          ↓
-                                  ┌─────────────┐
-                                  │ MQTT Broker │
-                                  └─────────────┘
+┌─────────────┐    Encrypted     ┌─────────────────────┐    Unencrypted    ┌──────────────┐
+│   Client    │ ───────────────> │  Athena-HttpMqtt-   │ ────────────────> │  HTTP APIs   │
+│ (Your App)  │ <─────────────── │      Gateway        │ <──────────────── │  (Any Server)│
+└─────────────┘    AES-GCM       └─────────────────────┘                    └──────────────┘
+                                            │
+                                            │ Unencrypted
+                                            ↓
+                                    ┌─────────────┐
+                                    │ MQTT Broker │
+                                    └─────────────┘
 ```
 
 The gateway acts as a secure proxy, encrypting/decrypting traffic between your client applications and backend services (HTTP APIs and MQTT).

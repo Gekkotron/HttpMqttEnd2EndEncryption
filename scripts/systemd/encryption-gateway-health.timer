@@ -1,6 +1,6 @@
 [Unit]
 Description=Encryption Gateway health check timer
-Documentation=https://github.com/Gekkotron/HttpMqttEnd2EndEncryption
+Documentation=https://github.com/Gekkotron/Athena-HttpMqttGateway
 
 [Timer]
 # Fire 1 minute after boot, then every 5 minutes after each activation.

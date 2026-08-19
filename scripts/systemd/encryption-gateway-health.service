@@ -1,6 +1,6 @@
 [Unit]
 Description=Encryption Gateway health check (one-shot)
-Documentation=https://github.com/Gekkotron/HttpMqttEnd2EndEncryption
+Documentation=https://github.com/Gekkotron/Athena-HttpMqttGateway
 Wants=network-online.target
 After=network-online.target docker.service
 
