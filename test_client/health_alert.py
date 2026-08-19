@@ -1,7 +1,13 @@
-"""Publish health-check failure alerts to an MQTT topic.
+"""Publish health-check state to an MQTT topic (state semantics).
 
-Called by the health_check orchestrator after each check completes.
-Only failures are published; a passing (or recovered) check is silent.
+Called by the health_check orchestrator after each check completes. By
+default every run publishes the current state so a subscriber (Jeedom,
+Home Assistant, ...) always knows whether the component is healthy —
+retained messages make the last state visible to subscribers that connect
+between runs. Set HEALTH_ALERT_PUBLISH_ON_SUCCESS=false to fall back to
+"only publish on failure" event semantics (in which case you probably
+also want HEALTH_ALERT_MQTT_RETAIN=false, otherwise a resolved failure
+sticks around forever).
 
 Topic layout:
     <HEALTH_ALERT_MQTT_TOPIC_PREFIX>/<component>
@@ -11,24 +17,26 @@ Topic layout:
 Payload (JSON):
     {
       "component": "gateway",
-      "status": "fail" | "config_error",
-      "exit_code": 1 | 2,
+      "status": "ok" | "fail" | "config_error",
+      "exit_code": 0 | 1 | 2,
       "restart_attempted": true | false,
       "timestamp": 1723456789,
       "host": "<gethostname>"
     }
 
 Environment variables:
-    MQTT_BROKER_HOST                Broker hostname (required for alerts to fire)
-    MQTT_BROKER_PORT                Broker port (default: 1883)
-    MQTT_USERNAME                   Optional broker username
-    MQTT_PASSWORD                   Optional broker password
-    HEALTH_ALERT_ENABLED            "true" | "false" | "auto" (default: auto).
-                                    "auto" enables when MQTT_BROKER_HOST is set.
-    HEALTH_ALERT_MQTT_TOPIC_PREFIX  Topic prefix (default: "encryption-gateway/health")
-    HEALTH_ALERT_MQTT_QOS           QoS 0/1/2 (default: 1)
-    HEALTH_ALERT_MQTT_RETAIN        "true"/"false" (default: false)
-    HEALTH_ALERT_MQTT_TIMEOUT       Connect timeout in seconds (default: 5)
+    MQTT_BROKER_HOST                    Broker hostname (required for alerts to fire)
+    MQTT_BROKER_PORT                    Broker port (default: 1883)
+    MQTT_USERNAME                       Optional broker username
+    MQTT_PASSWORD                       Optional broker password
+    HEALTH_ALERT_ENABLED                "true" | "false" | "auto" (default: auto).
+                                        "auto" enables when MQTT_BROKER_HOST is set.
+    HEALTH_ALERT_PUBLISH_ON_SUCCESS     "true"/"false" (default: true). When
+                                        false, only failures are published.
+    HEALTH_ALERT_MQTT_TOPIC_PREFIX      Topic prefix (default: "encryption-gateway/health")
+    HEALTH_ALERT_MQTT_QOS               QoS 0/1/2 (default: 1)
+    HEALTH_ALERT_MQTT_RETAIN            "true"/"false" (default: true — state topic)
+    HEALTH_ALERT_MQTT_TIMEOUT           Connect timeout in seconds (default: 5)
 """
 import json
 import os
@@ -43,6 +51,8 @@ from ._env import env_int, env_str
 
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
+
+_STATUS_BY_EXIT = {0: "ok", 1: "fail", 2: "config_error"}
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -64,6 +74,13 @@ def is_enabled() -> bool:
     return mode in _TRUTHY
 
 
+def _should_publish(exit_code: int) -> bool:
+    """Gate a publish attempt against HEALTH_ALERT_PUBLISH_ON_SUCCESS."""
+    if exit_code != 0:
+        return True
+    return _bool_env("HEALTH_ALERT_PUBLISH_ON_SUCCESS", True)
+
+
 def publish_alert(
     component: str,
     exit_code: int,
@@ -71,14 +88,15 @@ def publish_alert(
     restart_attempted: bool = False,
     verbose: bool = True,
 ) -> bool:
-    """Publish a failure alert for *component*. Returns True on success.
+    """Publish the current state of *component*. Returns True on success.
 
-    A publish failure is non-fatal: it prints a warning and returns False,
-    but never raises. Alerts are a side channel.
+    Publishes ok/fail/config_error depending on exit_code. A publish failure
+    is non-fatal: it prints a warning and returns False, but never raises.
+    Alerts are a side channel.
     """
-    if exit_code == 0:
-        return True
     if not is_enabled():
+        return True
+    if not _should_publish(exit_code):
         return True
 
     host = env_str("MQTT_BROKER_HOST")
@@ -93,11 +111,11 @@ def publish_alert(
 
     prefix = env_str("HEALTH_ALERT_MQTT_TOPIC_PREFIX", "encryption-gateway/health").rstrip("/")
     qos = env_int("HEALTH_ALERT_MQTT_QOS", 1)
-    retain = _bool_env("HEALTH_ALERT_MQTT_RETAIN", False)
+    retain = _bool_env("HEALTH_ALERT_MQTT_RETAIN", True)
     timeout = env_int("HEALTH_ALERT_MQTT_TIMEOUT", 5)
 
     topic = f"{prefix}/{component}"
-    status = "config_error" if exit_code == 2 else "fail"
+    status = _STATUS_BY_EXIT.get(exit_code, "fail")
     payload = json.dumps({
         "component": component,
         "status": status,
@@ -128,5 +146,7 @@ def publish_alert(
         return False
 
     if verbose:
-        print(f"[alert] published to {topic} (qos={qos}, retain={retain})")
+        print(
+            f"[alert] published {status} to {topic} (qos={qos}, retain={retain})"
+        )
     return True

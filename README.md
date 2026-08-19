@@ -739,9 +739,11 @@ Post-restart backoff (delays are cumulative, loop stops on the first PASS):
 With defaults, delays are 2s, 4s, 8s, 16s, 32s (max ~62s of waiting).
 Set `RESTART_BACKOFF_MAX_ATTEMPTS=0` to retry forever — the delay grows exponentially, plateaus at `RESTART_BACKOFF_MAX_DELAY` (5min by default), and the loop only exits when the check passes. Pair this with a systemd/cron *timer* rather than a supervisor loop if you want to be able to kill it easily.
 
-### MQTT failure alerts
+### MQTT state topic
 
-When a check ends in a non-zero state (either a plain failure or, when `--restart` was used, a failure the restart didn't recover), the orchestrator publishes a JSON message to the configured MQTT broker. Recovered checks stay silent. The alert is a side channel — if the broker is unreachable, a warning is printed to stderr but the exit code is not affected.
+After each check completes, the orchestrator publishes the current state as a JSON message to the configured MQTT broker. The message is **retained** by default so a subscriber (Jeedom, Home Assistant, …) that connects between runs immediately sees the last known state — no need to wait for the next timer fire. Publishing is a side channel; if the broker is unreachable, a warning goes to stderr but the exit code is not affected.
+
+**Semantics:** state, not event. `status` cycles through `ok` / `fail` / `config_error` on every run. Downstream automations should compare the payload's `status` field against their expected value rather than treating any message as an alert. If you preferred the old "silent while healthy" behaviour, set `HEALTH_ALERT_PUBLISH_ON_SUCCESS=false` — but also set `HEALTH_ALERT_MQTT_RETAIN=false`, otherwise a resolved failure sticks around as a retained message forever.
 
 **Topic layout:** `<HEALTH_ALERT_MQTT_TOPIC_PREFIX>/<component>`
 
@@ -755,9 +757,9 @@ Override `HEALTH_ALERT_MQTT_TOPIC_PREFIX` if you'd rather group these under some
 ```json
 {
   "component": "gateway",
-  "status": "fail",           // or "config_error" for exit 2
-  "exit_code": 1,
-  "restart_attempted": true,
+  "status": "ok",             // "ok" | "fail" | "config_error"
+  "exit_code": 0,
+  "restart_attempted": false,
   "timestamp": 1723456789,
   "host": "raspberrypi"
 }
@@ -767,13 +769,14 @@ Override `HEALTH_ALERT_MQTT_TOPIC_PREFIX` if you'd rather group these under some
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `MQTT_BROKER_HOST` | Broker hostname (required for alerts to fire) | *(unset — alerts disabled)* |
+| `MQTT_BROKER_HOST` | Broker hostname (required for publishing) | *(unset — disabled)* |
 | `MQTT_BROKER_PORT` | Broker port | `1883` |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | Optional broker credentials | *(unset)* |
 | `HEALTH_ALERT_ENABLED` | `auto` (enable if broker set), `true`, or `false` | `auto` |
+| `HEALTH_ALERT_PUBLISH_ON_SUCCESS` | Publish on PASS too (state topic) or only on FAIL (event) | `true` |
 | `HEALTH_ALERT_MQTT_TOPIC_PREFIX` | Topic prefix | `encryption-gateway/health` |
 | `HEALTH_ALERT_MQTT_QOS` | QoS 0/1/2 | `1` |
-| `HEALTH_ALERT_MQTT_RETAIN` | Retain flag (bool) | `false` |
+| `HEALTH_ALERT_MQTT_RETAIN` | Retain flag — leave on for state semantics | `true` |
 | `HEALTH_ALERT_MQTT_TIMEOUT` | Connect timeout, seconds | `5` |
 
 Pass `--no-alert` on the command line to skip publishing for a single invocation (useful when running the check interactively during debugging).

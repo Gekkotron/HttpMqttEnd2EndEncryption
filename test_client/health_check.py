@@ -34,11 +34,13 @@ Environment variables (in addition to those of the per-check modules):
   With MAX_ATTEMPTS=0, delays follow the same sequence but plateau at
   MAX_DELAY and repeat forever until the check passes.
 
-MQTT failure alerts:
-  When a check ends in a non-zero state (including after --restart failed to
-  recover), a JSON message is published to <TOPIC_PREFIX>/<component> on
-  MQTT_BROKER_HOST. Recovered checks stay silent. See test_client.health_alert
-  for env vars (HEALTH_ALERT_MQTT_*). Pass --no-alert to skip publishing.
+MQTT state topic:
+  After each check completes, a JSON message with the current state
+  (ok / fail / config_error) is published to <TOPIC_PREFIX>/<component>
+  on MQTT_BROKER_HOST. Retain is on by default so subscribers see the
+  last state on connect. Set HEALTH_ALERT_PUBLISH_ON_SUCCESS=false to
+  fall back to failure-only event semantics. See test_client.health_alert
+  for the full env-var list. Pass --no-alert to skip publishing.
 """
 import argparse
 import os
@@ -166,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             restart=args.restart, backoff=backoff, verbose=verbose,
         )
         codes.append(code)
-        if code != 0 and alerts_enabled:
+        if alerts_enabled:
             sys.stdout.flush()
             health_alert.publish_alert(
                 "gateway", code,
@@ -181,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             restart=args.restart, backoff=backoff, verbose=verbose,
         )
         codes.append(code)
-        if code != 0 and alerts_enabled:
+        if alerts_enabled:
             sys.stdout.flush()
             health_alert.publish_alert(
                 "tailscale", code,
