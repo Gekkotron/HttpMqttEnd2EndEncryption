@@ -34,6 +34,8 @@ import sys
 import requests
 from dotenv import load_dotenv
 
+from ._env import env_float, env_int, env_str
+
 
 def _run_tailscale(bin_path: str, args: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
     try:
@@ -118,7 +120,7 @@ def restart(verbose: bool = True) -> tuple[bool, str]:
     which itself does ``sudo tailscale funnel off`` followed by
     ``sudo tailscale funnel -bg <port>``.
     """
-    cmd = os.getenv("TAILSCALE_RESTART_CMD", DEFAULT_RESTART_CMD)
+    cmd = env_str("TAILSCALE_RESTART_CMD", DEFAULT_RESTART_CMD)
 
     if verbose:
         print(f"[tailscale] restarting via: {cmd}")
@@ -149,7 +151,7 @@ def _should_check_local(bin_path: str) -> tuple[bool, str]:
     Returns (do_local_checks, reason). ``reason`` is only meaningful when the
     local checks are skipped or when the resolution is forced.
     """
-    mode = os.getenv("TAILSCALE_CHECK_LOCAL", "auto").strip().lower()
+    mode = env_str("TAILSCALE_CHECK_LOCAL", "auto").lower()
     have_bin = shutil.which(bin_path) is not None
 
     if mode in ("true", "1", "yes", "on"):
@@ -166,10 +168,10 @@ def run(verbose: bool = True) -> int:
     """Run the tailscale health check. Returns a process exit code."""
     load_dotenv()
 
-    bin_path = os.getenv("TAILSCALE_BIN", "tailscale")
-    expected_port = int(os.getenv("TAILSCALE_FUNNEL_PORT", "10000"))
-    funnel_url = os.getenv("TAILSCALE_FUNNEL_URL", "").strip()
-    timeout = float(os.getenv("HEALTH_TIMEOUT", "10"))
+    bin_path = env_str("TAILSCALE_BIN", "tailscale")
+    expected_port = env_int("TAILSCALE_FUNNEL_PORT", 10000)
+    funnel_url = env_str("TAILSCALE_FUNNEL_URL", "")
+    timeout = env_float("HEALTH_TIMEOUT", 10)
 
     do_local, local_reason = _should_check_local(bin_path)
 

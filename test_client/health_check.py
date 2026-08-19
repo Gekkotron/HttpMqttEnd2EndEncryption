@@ -49,6 +49,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test_client import health_alert, health_check_gateway, health_check_tailscale  # noqa: E402
+from test_client._env import env_float, env_int  # noqa: E402
 
 
 class BackoffConfig:
@@ -63,10 +64,10 @@ class BackoffConfig:
     """
 
     def __init__(self) -> None:
-        self.initial = float(os.getenv("RESTART_BACKOFF_INITIAL", "2"))
-        self.factor = float(os.getenv("RESTART_BACKOFF_FACTOR", "2"))
-        self.max_attempts = int(os.getenv("RESTART_BACKOFF_MAX_ATTEMPTS", "5"))
-        self.max_delay = float(os.getenv("RESTART_BACKOFF_MAX_DELAY", "300"))
+        self.initial = env_float("RESTART_BACKOFF_INITIAL", 2)
+        self.factor = env_float("RESTART_BACKOFF_FACTOR", 2)
+        self.max_attempts = env_int("RESTART_BACKOFF_MAX_ATTEMPTS", 5)
+        self.max_delay = env_float("RESTART_BACKOFF_MAX_DELAY", 300)
 
     @property
     def infinite(self) -> bool:

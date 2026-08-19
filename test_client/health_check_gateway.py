@@ -31,6 +31,8 @@ import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
+from ._env import env_float, env_str
+
 
 def _encrypt(secret_key: bytes, data: dict) -> bytes:
     nonce = os.urandom(12)
@@ -140,10 +142,10 @@ def run(verbose: bool = True) -> int:
     """Run the gateway health check. Returns a process exit code."""
     load_dotenv()
 
-    gateway_url = os.getenv("GATEWAY_URL", "http://localhost:10000").rstrip("/")
-    key_file = os.getenv("SECRET_KEY_FILE", "server/secret_key.txt")
-    target_url = os.getenv("HEALTH_CHECK_URL", "https://httpbin.org/get")
-    timeout = float(os.getenv("HEALTH_TIMEOUT", "10"))
+    gateway_url = env_str("GATEWAY_URL", "http://localhost:10000").rstrip("/")
+    key_file = env_str("SECRET_KEY_FILE", "server/secret_key.txt")
+    target_url = env_str("HEALTH_CHECK_URL", "https://httpbin.org/get")
+    timeout = env_float("HEALTH_TIMEOUT", 10)
 
     if verbose:
         print(f"[gateway] checking {gateway_url}")

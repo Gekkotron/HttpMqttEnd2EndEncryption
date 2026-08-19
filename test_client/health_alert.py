@@ -38,16 +38,17 @@ import time
 
 import paho.mqtt.client as mqtt
 
+from ._env import env_int, env_str
+
 
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
 
 
 def _bool_env(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
+    v = env_str(name, "").lower()
+    if not v:
         return default
-    v = raw.strip().lower()
     if v in _TRUTHY:
         return True
     if v in _FALSY:
@@ -57,9 +58,9 @@ def _bool_env(name: str, default: bool) -> bool:
 
 def is_enabled() -> bool:
     """Return True if alerts should fire for this invocation."""
-    mode = os.getenv("HEALTH_ALERT_ENABLED", "auto").strip().lower()
+    mode = env_str("HEALTH_ALERT_ENABLED", "auto").lower()
     if mode == "auto":
-        return bool(os.getenv("MQTT_BROKER_HOST"))
+        return bool(env_str("MQTT_BROKER_HOST"))
     return mode in _TRUTHY
 
 
@@ -80,20 +81,20 @@ def publish_alert(
     if not is_enabled():
         return True
 
-    host = os.getenv("MQTT_BROKER_HOST")
+    host = env_str("MQTT_BROKER_HOST")
     if not host:
         if verbose:
             print("[alert] MQTT_BROKER_HOST not set, skipping publish", file=sys.stderr)
         return False
 
-    port = int(os.getenv("MQTT_BROKER_PORT", "1883"))
-    username = os.getenv("MQTT_USERNAME")
-    password = os.getenv("MQTT_PASSWORD")
+    port = env_int("MQTT_BROKER_PORT", 1883)
+    username = env_str("MQTT_USERNAME") or None
+    password = env_str("MQTT_PASSWORD") or None
 
-    prefix = os.getenv("HEALTH_ALERT_MQTT_TOPIC_PREFIX", "encryption-gateway/health").rstrip("/")
-    qos = int(os.getenv("HEALTH_ALERT_MQTT_QOS", "1"))
+    prefix = env_str("HEALTH_ALERT_MQTT_TOPIC_PREFIX", "encryption-gateway/health").rstrip("/")
+    qos = env_int("HEALTH_ALERT_MQTT_QOS", 1)
     retain = _bool_env("HEALTH_ALERT_MQTT_RETAIN", False)
-    timeout = int(os.getenv("HEALTH_ALERT_MQTT_TIMEOUT", "5"))
+    timeout = env_int("HEALTH_ALERT_MQTT_TIMEOUT", 5)
 
     topic = f"{prefix}/{component}"
     status = "config_error" if exit_code == 2 else "fail"
